@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Leaderboard XP - Level</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      padding: 20px;
+      max-width: 800px;
+      margin: auto;
+      background-color: #f9fafb;
+    }
+    h1 {
+      color: #3B82F6;
+    }
+    label, select, input, button {
+      display: block;
+      width: 100%;
+      margin: 10px 0;
+      padding: 8px;
+    }
+    button {
+      background-color: #3B82F6;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #progressBar {
+      width: 100%;
+      background-color: #e0e0e0;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    #progress {
+      height: 20px;
+      background-color: #3B82F6;
+      width: 0%;
+      transition: width 0.3s;
+    }
+    .totals {
+      margin: 15px 0;
+      padding: 10px;
+      background-color: #eff6ff;
+      border-left: 4px solid #3B82F6;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    table th, table td {
+      padding: 8px;
+      border: 1px solid #ccc;
+      text-align: left;
+    }
+    .etherscan-link {
+      text-decoration: none;
+      color: #3B82F6;
+    }
+    .etherscan-link::after {
+      content: "\1F517";
+      margin-left: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🏆 Leaderboard de XP - Level</h1>
+
+  <div class="totals" id="totalXPBox">Carregando XP total da comunidade...</div>
+
+  <label for="limit">Filtrar Top:</label>
+  <select id="limit">
+    <option value="0">Não filtrar por Top</option>
+    <option value="10">Top 10</option>
+    <option value="100">Top 100</option>
+    <option value="1000">Top 1000</option>
+  </select>
+
+  <label for="search">Filtrar por endereço:</label>
+  <input type="text" id="search" placeholder="Ex: 0xAbc...">
+
+  <button onclick="start()">🔍 Buscar</button>
+  <button onclick="mostrarTodos()">📃 Mostrar todos os dados</button>
+
+  <div id="progressBar"><div id="progress"></div></div>
+  <button onclick="downloadCSV()" id="downloadBtn" style="display:none;">📁 Baixar CSV</button>
+  <div id="output"></div>
+  <canvas id="chart" style="max-width: 100%; margin-top: 30px;"></canvas>
+
+  <script>
+    let allData = [];
+    let csvContent = "";
+    let totalXPGlobal = 0;
+
+    async function fetchLeaderboardPage(page, take = 100) {
+      const url = `https://api.level.money/v1/xp/balances/leaderboard?page=${page}&take=${take}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      return data.leaderboard || [];
+    }
+
+    async function fetchTotalXP() {
+      let page = 1;
+      let take = 100;
+      totalXPGlobal = 0;
+      while (true) {
+        const data = await fetchLeaderboardPage(page++, take);
+        if (!data.length) break;
+        data.forEach(entry => totalXPGlobal += parseInt(entry.balance?.accrued || 0));
+      }
+      document.getElementById("totalXPBox").innerHTML = `💠 XP total da comunidade: <strong>${totalXPGlobal.toLocaleString()} XP</strong>`;
+    }
+
+    async function start(showAll = false) {
+      const limit = parseInt(document.getElementById("limit").value);
+      const search = document.getElementById("search").value.toLowerCase();
+      allData = [];
+      let page = 1;
+      let take = 100;
+      let loaded = 0;
+      let progress = document.getElementById("progress");
+      let output = document.getElementById("output");
+      output.innerHTML = "<p>Carregando...</p>";
+      while (true) {
+        const data = await fetchLeaderboardPage(page++, take);
+        if (!data.length) break;
+        allData.push(...data);
+        loaded += data.length;
+        progress.style.width = `${Math.min(loaded / 20000 * 100, 100)}%`;
+        if (!showAll && limit && loaded >= limit) break;
+      }
+      let filtered = allData;
+      if (!showAll && limit) filtered = filtered.slice(0, limit);
+      if (search) filtered = filtered.filter(e => (e.user?.address || '').toLowerCase().includes(search));
+      renderTable(filtered);
+      renderChart(filtered.slice(0, 10));
+    }
+
+    function mostrarTodos() {
+      start(true);
+    }
+    
+
+    function renderTable(data) {
+      const output = document.getElementById("output");
+      let total = data.reduce((acc, e) => acc + parseInt(e.balance?.accrued || 0), 0);
+      let html = `<p>🔢 Total XP do filtro: <strong>${total.toLocaleString()}</strong></p>`;
+      html += `<table><tr><th>#</th><th>Endereço</th><th>XP</th></tr>`;
+      data.forEach((entry, i) => {
+        const addr = entry.address?.address || "?";
+
+        const shortAddr = `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+        const xp = parseInt(entry.balance?.accrued || 0);
+        html += `<tr><td>${i + 1}</td><td><a class='etherscan-link' href='https://etherscan.io/address/${addr}' target='_blank'>${shortAddr}</a></td><td>${xp.toLocaleString()}</td></tr>`;
+      });
+      html += `</table>`;
+      document.getElementById("downloadBtn").style.display = data.length ? 'block' : 'none';
+      output.innerHTML = html;
+
+      csvContent = "Posição,Endereço,XP\n" + data.map((entry, i) => `${i+1},${entry.address.address},${parseInt(entry.balance?.accrued || 0)}`).join("\n");
+    }
+
+    function renderChart(data) {
+      const ctx = document.getElementById("chart");
+      const addresses = data.map(e => {
+        const addr = e.address?.address || "?";
+        return `${addr.slice(0, 4)}...${addr.slice(-4)}`;
+        });
+      const xpValues = data.map(e => parseInt(e.balance?.accrued || 0));
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: addresses,
+          datasets: [{
+            label: 'Top 10 XP',
+            data: xpValues,
+            backgroundColor: '#3B82F6'
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: { beginAtZero: true }
+          }
+        }
+      });
+    }
+
+    function downloadCSV() {
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "leaderboard.csv";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    fetchTotalXP();
+  </script>
+</body>
+</html>
