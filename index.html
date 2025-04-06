@@ -134,7 +134,7 @@
       }
       let filtered = allData;
       if (!showAll && limit) filtered = filtered.slice(0, limit);
-      if (search) filtered = filtered.filter(e => (e.user?.address || '').toLowerCase().includes(search));
+      if (search) filtered = filtered.filter(e => (e.address?.address || '').toLowerCase().includes(search));
       renderTable(filtered);
       renderChart(filtered.slice(0, 10));
     }
